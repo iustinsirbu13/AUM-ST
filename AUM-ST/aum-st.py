@@ -1,4 +1,4 @@
-from data import sample_split, get_eval_dataset, retrieve_augmentations
+from data import sample_split, get_eval_dataset, retrieve_augmentations, read_split, get_eval_dataset_v2
 from distutils.command.config import config
 from sklearn.utils import shuffle
 
@@ -53,7 +53,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("pt_teacher_checkpoint",
-                    "bert-base-uncased", "Initialization checkpoint.")
+                    "cardiffnlp/twitter-roberta-base-sep2022", "Initialization checkpoint.")
+
+flags.DEFINE_string("input_dir",
+                    "SAMPLE", "Directory that contains the input files. If SAMPLE, the train data will be sampled from the augmentation_dir.")
+flags.DEFINE_string("train_file",
+                    "train.csv", "Name of the train csv.")
 flags.DEFINE_string("augmentation_dir",
                     "...", "Directory that contains the output of the augmentation script.")
 
@@ -115,13 +120,22 @@ def main(argv):
     available_augmentations = os.listdir(FLAGS.augmentation_dir)
     # Although in a real-world setup we don't have access to unlabeled labels, we keep
     # track of them here to compute various metrics such as impurity or mask rate.
-    ids_train, labels_train, ids_unlabeled, labels_unlabeled = sample_split(
-        available_augmentations[0], FLAGS)
-    validation_dataset = get_eval_dataset(
-        FLAGS.validation_path, tokenizer, sampling_strategy=FLAGS.num_labels)
-    test_dataset = get_eval_dataset(FLAGS.test_path, tokenizer)
-    weak_train_dict, weak_unlabeled_dict, strong_unlabeled_dict = retrieve_augmentations(
-        available_augmentations, FLAGS.weak_augmentation_min_strength, FLAGS.weak_augmentation_max_strength, FLAGS.strong_augmentation_min_strength, FLAGS.strong_augmentation_max_strength, ids_train, ids_unlabeled, FLAGS.augmentation_dir)
+    if FLAGS.input_dir == 'SAMPLE':
+        ids_train, labels_train, ids_unlabeled, labels_unlabeled = sample_split(available_augmentations[0], FLAGS)
+        validation_dataset = get_eval_dataset(FLAGS.validation_path, tokenizer, sampling_strategy=FLAGS.num_labels)
+        test_dataset = get_eval_dataset(FLAGS.test_path, tokenizer)
+
+        weak_train_dict, weak_unlabeled_dict, strong_unlabeled_dict = retrieve_augmentations(
+            available_augmentations, FLAGS.weak_augmentation_min_strength, FLAGS.weak_augmentation_max_strength, FLAGS.strong_augmentation_min_strength, FLAGS.strong_augmentation_max_strength, ids_train, ids_unlabeled, FLAGS.augmentation_dir)
+
+    else:
+        ids_train, labels_train, ids_unlabeled, labels_unlabeled = read_split(FLAGS)
+        validation_dataset = get_eval_dataset_v2(FLAGS.validation_path, tokenizer)
+        test_dataset = get_eval_dataset_v2(FLAGS.test_path, tokenizer)
+
+        weak_train_dict, weak_unlabeled_dict, strong_unlabeled_dict = retrieve_augmentations(
+            available_augmentations, FLAGS.weak_augmentation_min_strength, FLAGS.weak_augmentation_max_strength, FLAGS.strong_augmentation_min_strength, FLAGS.strong_augmentation_max_strength, ids_train, ids_unlabeled, FLAGS.augmentation_dir, with_query=True)
+
 
     train_dataset = TrainDataset(
         weak_train_dict, labels_train, ids_train, tokenizer)

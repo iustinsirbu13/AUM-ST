@@ -51,7 +51,10 @@ def predict_unlabeled(FLAGS, unlabeled_weak_dataloader):
             pred = model(
                 input_ids=x['input_ids'], token_type_ids=x['token_type_ids'], attention_mask=x['attention_mask'])
             y_predictions_unlabeled.extend(pred.logits.cpu().numpy())
-            y_ids_unlabeled.extend(elem['idx'].cpu().numpy())
+            if isinstance(elem['idx'], list):
+                y_ids_unlabeled.extend(elem['idx'])
+            else:
+                y_ids_unlabeled.extend(elem['idx'].cpu().numpy())
             y_ids_hidden_gold_labels.extend(elem['lbl'].numpy())
 
     pseudo_labels = np.argmax(y_predictions_unlabeled, axis=-1).flatten()
@@ -109,6 +112,8 @@ def train_supervised_once(FLAGS, labeled_dataloader, validation_dataloader, inte
     best_f1 = 0
     for epoch in range(15):
         for data in tqdm(labeled_dataloader):
+            # print(data)
+            # print(data['input_ids'].shape)
             cuda_tensors = {key: data[key].to(
                 device) for key in data if key not in ['idx']}
             optimizer.zero_grad()
@@ -195,7 +200,7 @@ def train_ssl(FLAGS, best_f1_overall, train_dataset, strong_unlabeled_dict, labe
 
             if use_aum:
                 aum_calculator.update(
-                    logits_ulbl.detach(), cuda_tensors_unsupervised['lbl'], data_unsupervised['idx'].numpy())
+                    logits_ulbl.detach(), cuda_tensors_unsupervised['lbl'], np.array(data_unsupervised['idx']))
 
             loss_sup = loss_fn_supervised(
                 logits_lbls, cuda_tensors_supervised['lbl'])

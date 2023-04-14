@@ -16,8 +16,12 @@ class TestDataset(torch.utils.data.Dataset):
         self.seq_len = seq_len
 
     def __getitem__(self, idx):
-        tok = self.tokenizer(
-            self.text_list[idx], padding='max_length', max_length=self.seq_len, truncation=True)
+        inputs = self.text_list[idx]
+        if isinstance(inputs, list) and len(inputs) == 2:
+            tok = self.tokenizer(*self.text_list[idx], padding='max_length', max_length=self.seq_len, truncation=True, return_token_type_ids=True)
+        else:
+            tok = self.tokenizer(self.text_list[idx], padding='max_length', max_length=self.seq_len, truncation=True, return_token_type_ids=True)
+
         item = {key: torch.tensor(tok[key]) for key in tok}
         item['lbl'] = torch.tensor(self.labels[idx], dtype=torch.long)
         return item
@@ -36,8 +40,12 @@ class TrainDataset(torch.utils.data.Dataset):
         self.seq_len = seq_len
 
     def __getitem__(self, idx):
-        tok = self.tokenizer(
-            random.choice(self.augmentation_dict[self.ids[idx]]), padding='max_length', max_length=self.seq_len, truncation=True)
+        inputs = random.choice(self.augmentation_dict[self.ids[idx]])
+        if isinstance(inputs, list) and len(inputs) == 2:
+            tok = self.tokenizer(*inputs, padding='max_length', max_length=self.seq_len, truncation=True, return_token_type_ids=True)
+        else:
+            tok = self.tokenizer(inputs, padding='max_length', max_length=self.seq_len, truncation=True, return_token_type_ids=True)
+
         item = {key: torch.tensor(tok[key]) for key in tok}
         item['lbl'] = torch.tensor(
             self.labels_dict[self.ids[idx]], dtype=torch.long)
@@ -111,6 +119,18 @@ def sample_split(initial_set, FLAGS):
     return ids_train, labels_train, ids_unlabeled, labels_unlabeled
 
 
+def read_split(FLAGS):
+    df_train = pd.read_csv(os.path.join(FLAGS.input_dir, FLAGS.train_file))
+    ids_train = df_train.Id.tolist()
+    labels_train = df_train[['Id', 'Label']].set_index('Id').to_dict()['Label']
+
+    df_unlabeled = pd.read_csv(os.path.join(FLAGS.input_dir, 'unlabeled.csv'))
+    ids_unlabeled = df_unlabeled.Id.tolist()
+    labels_unlabeled = df_unlabeled[['Id', 'Label']].set_index('Id').to_dict()['Label']
+
+    return ids_train, labels_train, ids_unlabeled, labels_unlabeled 
+
+
 def get_eval_dataset(path, tokenizer, sampling_strategy=-1):
 
     df = pd.read_csv(path)
@@ -140,6 +160,23 @@ def get_eval_dataset(path, tokenizer, sampling_strategy=-1):
     return dataset
 
 
+def get_eval_dataset_v2(path, tokenizer, sampling_strategy=-1):
+
+    df = pd.read_csv(path)
+    text_list = []
+    labels_list = []
+    for i, row in df.iterrows():
+        text_list.append([row['Text'], row['Query']])
+        labels_list.append(row['Label'])
+
+    if sampling_strategy != -1:
+        raise NotImplementedError()
+
+    dataset = TestDataset(text_list, labels_list, tokenizer)
+
+    return dataset
+
+
 def retrieve_simple(ids, paths, min_str, max_str):
     id_set = set(ids)
     aug_dict = defaultdict(list)
@@ -153,20 +190,34 @@ def retrieve_simple(ids, paths, min_str, max_str):
     return aug_dict
 
 
-def retrieve_augmentations(available_augmentations, weak_aug_min, weak_aug_max, strong_aug_min, strong_aug_max, ids_train, ids_unlabeled, augmentation_dir):
+def retrieve_with_query(ids, paths, min_str, max_str):
+    id_set = set(ids)
+    aug_dict = defaultdict(list)
+    for augmented_file in tqdm(paths):
+        df = pd.read_csv(augmented_file)
+        if df['Strength'][0] >= min_str and df['Strength'][0] <= max_str:
+            for i, row in df.iterrows():
+                if row['Id'] in id_set:
+                    aug_dict[row['Id']].append([row['Text'], row['Query']])
+
+    return aug_dict
+
+
+def retrieve_augmentations(available_augmentations, weak_aug_min, weak_aug_max, strong_aug_min, strong_aug_max, ids_train, ids_unlabeled, augmentation_dir, with_query=False):
     aug_paths = []
+    retrieve_fn = retrieve_with_query if with_query else retrieve_simple
 
     for e in available_augmentations:
         aug_paths.append(os.path.join(augmentation_dir, e))
 
     print('Collecting weak augmentations for training set.')
-    weak_train_dict = retrieve_simple(
+    weak_train_dict = retrieve_fn(
         ids_train, aug_paths, weak_aug_min, weak_aug_max)
     print('Collecting weak augmentations for unlabeled set.')
-    weak_unlabeled_dict = retrieve_simple(
+    weak_unlabeled_dict = retrieve_fn(
         ids_unlabeled, aug_paths, weak_aug_min, weak_aug_max)
     print('Collecting strong augmentations for unlabeled set.')
-    strong_unlabeled_dict = retrieve_simple(
+    strong_unlabeled_dict = retrieve_fn(
         ids_unlabeled, aug_paths, strong_aug_min, strong_aug_max)
 
     return weak_train_dict, weak_unlabeled_dict, strong_unlabeled_dict
