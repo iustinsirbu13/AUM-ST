@@ -270,7 +270,7 @@ def main(argv):
 
     if not os.path.isdir(FLAGS.augmentation_dir):
         os.mkdir(FLAGS.augmentation_dir)
-    if FLAGS.chain_length < 2:
+    if (not FLAGS.backtranslation) or (FLAGS.chain_length < 2):
         FLAGS.chain_length = 1
     augmentation_strength = FLAGS.num_synonym_replacement + \
         int(FLAGS.prob_random_deletion * 20) + 3 * (FLAGS.chain_length - 1)
