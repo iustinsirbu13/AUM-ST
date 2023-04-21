@@ -106,7 +106,7 @@ def train_supervised_once(FLAGS, labeled_dataloader, validation_dataloader, inte
         pt_teacher_checkpoint, num_labels=FLAGS.num_classes)
     model.to(device)
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-05)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     loss_fn = torch.nn.CrossEntropyLoss(reduction='mean')
 
     best_f1 = 0
@@ -161,7 +161,7 @@ def train_ssl(FLAGS, best_f1_overall, train_dataset, strong_unlabeled_dict, labe
             FLAGS.pt_teacher_checkpoint, num_labels=FLAGS.num_classes)
 
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-05)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     model.train()
 
     loss_fn_supervised = torch.nn.CrossEntropyLoss(reduction='mean')
