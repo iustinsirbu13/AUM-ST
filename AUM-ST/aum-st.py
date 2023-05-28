@@ -22,7 +22,7 @@ from sklearn.utils import shuffle
 from sklearn.metrics import f1_score
 from transformers import *
 from tqdm import tqdm
-from train import evaluate
+from train import evaluate, evaluate_full
 
 from aum import AUMCalculator
 
@@ -49,9 +49,13 @@ def set_global_logging_level(level=logging.ERROR, prefices=[""]):
 set_global_logging_level(logging.ERROR, ["transformers", "torch"])
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = 'cpu'
 
 
 FLAGS = flags.FLAGS
+flags.DEFINE_enum("action",
+                  "train", ['train', 'eval_full'], "The action to perform.")
+
 flags.DEFINE_string("pt_teacher_checkpoint",
                     "cardiffnlp/twitter-roberta-base-sep2022", "Initialization checkpoint.")
 
@@ -150,6 +154,30 @@ def main(argv):
         validation_dataset, batch_size=FLAGS.inference_batch_size, shuffle=False)
     test_dataloader = torch.utils.data.DataLoader(
         test_dataset, batch_size=FLAGS.inference_batch_size, shuffle=False)
+
+    print(f'Action: {FLAGS.action}')
+    if FLAGS.action == 'eval_full':
+        # print(FLAGS.intermediate_model_path)
+        # print(os.listdir(FLAGS.intermediate_model_path))
+        # print()
+
+        # model = AutoModelForSequenceClassification.from_pretrained(FLAGS.pt_teacher_checkpoint, num_labels=FLAGS.num_classes)
+        # model.save_pretrained(FLAGS.intermediate_model_path)
+
+        # model = AutoModelForSequenceClassification.from_pretrained(FLAGS.intermediate_model_path)
+
+        # assert False
+
+        # cfg = AutoConfig.from_pretrained(FLAGS.intermediate_model_path)
+        # print(cfg)
+        # model = AutoModelForSequenceClassification.from_pretrained(FLAGS.intermediate_model_path, config=cfg)
+        model = AutoModelForSequenceClassification.from_pretrained(FLAGS.intermediate_model_path)
+        model.to(device)
+        loss_fn = torch.nn.CrossEntropyLoss(reduction='mean')
+        evaluate_full(model, validation_dataloader, loss_fn, FLAGS, tst_name='Valid', add_calibrated_ece=True)
+        evaluate_full(model, test_dataloader, loss_fn, FLAGS, tst_name='Test', add_calibrated_ece=True)
+        return
+    
 
     tensorboard_logger = TensorboardLog(
         FLAGS.tensorboard_dir, FLAGS.experiment_id)

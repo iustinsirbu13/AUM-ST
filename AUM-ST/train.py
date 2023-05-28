@@ -27,7 +27,9 @@ import math
 import numpy as np
 import os
 import torch
-
+from utils import all_metrics, _get_output_dicts
+from calibration_error import calculate_calibration_error
+import json
 from data import TrainDataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -264,5 +266,70 @@ def evaluate(model, test_dataloader, criterion, batch_size):
                 list(elem['lbl'].cpu().detach().numpy())
 
     model.train()
+
+    return f1_score(true_labels, full_predictions, average='macro'), crt_loss / len(test_dataloader)
+
+
+def evaluate_full(model, test_dataloader, criterion, FLAGS, tst_name='Valid', add_calibrated_ece=False):
+    full_predictions = []
+    full_logits = []
+    true_labels = []
+    output_dicts = []
+
+    model.eval()
+    crt_loss = 0
+
+    with torch.no_grad():
+        for idx, elem in tqdm(enumerate(test_dataloader), total=len(test_dataloader)):
+            x = {key: elem[key].to(device)
+                 for key in elem if key not in ['idx']}
+            logits = model(
+                input_ids=x['input_ids'], token_type_ids=x['token_type_ids'], attention_mask=x['attention_mask'])
+            results = torch.argmax(logits.logits, dim=1)
+
+            crt_loss += criterion(logits.logits, x['lbl']
+                                  ).cpu().detach().numpy()
+            # full_logits = full_logits + list(logits.logits.cpu().detach().numpy())
+            full_logits = full_logits + list(logits.logits.cpu().detach().numpy().tolist())
+            full_predictions = full_predictions + \
+                list(results.cpu().detach().numpy().tolist())
+            true_labels = true_labels + \
+                list(elem['lbl'].cpu().detach().numpy().tolist())
+            output_dicts += _get_output_dicts(FLAGS.inference_batch_size, idx, elem['lbl'].cpu().detach(), logits.logits.cpu().detach())
+
+    model.train()
+
+    scores = all_metrics(full_predictions, true_labels, use_logits=False)
+    ece_outputs = calculate_calibration_error(output_dicts, FLAGS.num_classes)
+    scores['ECE/uncalibrated'] = ece_outputs['expected error']
+
+    if add_calibrated_ece:
+        if tst_name.startswith('Valid'):
+            temperature = None # optimal temperature will be computed
+        elif tst_name.startswith('Test'):
+            valid_name = tst_name.replace('Test', 'Valid', 1)
+            with open(os.path.join(FLAGS.intermediate_model_path, f'stats_{valid_name}.json')) as fp:
+                valid_stats = json.load(fp)
+                temperature = valid_stats['ece_outputs_calibrated']['temperature']
+                print(f"Calibrating with temperature {temperature}")
+
+        ece_outputs_calibrated = calculate_calibration_error(output_dicts, FLAGS.num_classes, temperature)
+        scores['ECE/calibrated'] = ece_outputs_calibrated['expected error']
+    else:
+        ece_outputs_calibrated = {}
+
+    stats = {
+        'outputs': full_logits,
+        'preds': full_predictions,
+        'targets': true_labels,
+        'scores': scores,
+        'ece_outputs_uncalibrated': ece_outputs,
+        'ece_outputs_calibrated': ece_outputs_calibrated
+    }
+    # print(stats)
+
+    stats_file = os.path.join(FLAGS.intermediate_model_path, f'stats_{tst_name}.json')
+    with open(stats_file, 'w') as f:
+        json.dump(stats, f)
 
     return f1_score(true_labels, full_predictions, average='macro'), crt_loss / len(test_dataloader)
